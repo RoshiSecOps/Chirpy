@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sync/atomic"
@@ -25,31 +26,22 @@ func main() {
 			Valid bool `json:"valid"`
 		}
 
-		decoder := json.NewDecoder(r.Body)
+		dat, err := io.ReadAll(r.Body)
+		if err != nil {
+			respondWithError(w, 500, "Something went wrong")
+			return
+		}
 		params := parameters{}
-		err := decoder.Decode(&params)
+		err = json.Unmarshal(dat, &params)
 		if err != nil {
-			log.Printf("Error decoding parameters: %s", err)
-			w.WriteHeader(500)
+			respondWithError(w, 500, "Something went wrong")
 			return
 		}
-		respBody := returnVals{
-			Valid: true,
-		}
-		dat, err := json.Marshal(respBody)
-		if err != nil {
-			log.Printf("Error marshalling JSON: %s", err)
-			w.WriteHeader(500)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
 		if len(params.Body) < 140 {
-			w.Write(dat)
+			respondWithJSON(w, 200, returnVals{Valid: true})
 		} else {
-			w.Write([]byte("Error, chirp is too long!"))
+			respondWithError(w, 400, "Chirp is too long")
 		}
-
 	})
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
@@ -94,4 +86,20 @@ func (cfg *apiConfig) metricsHandler(w http.ResponseWriter, r *http.Request) {
     		<p>Chirpy has been visited %d times!</p>
   		</body>
 	</html>`, cfg.getHits())))
+}
+
+func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error {
+	response, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.WriteHeader(code)
+	w.Write(response)
+	return nil
+}
+
+func respondWithError(w http.ResponseWriter, code int, msg string) error {
+	return respondWithJSON(w, code, map[string]string{"error": msg})
 }
