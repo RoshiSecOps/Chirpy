@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync/atomic"
 )
 
@@ -23,7 +24,7 @@ func main() {
 			Body string `json:"body"`
 		}
 		type returnVals struct {
-			Valid bool `json:"valid"`
+			CleanedBody string `json:"cleaned_body"`
 		}
 
 		dat, err := io.ReadAll(r.Body)
@@ -38,7 +39,7 @@ func main() {
 			return
 		}
 		if len(params.Body) < 140 {
-			respondWithJSON(w, 200, returnVals{Valid: true})
+			respondWithJSON(w, 200, returnVals{CleanedBody: cleanBody(params.Body)})
 		} else {
 			respondWithError(w, 400, "Chirp is too long")
 		}
@@ -102,4 +103,17 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) error
 
 func respondWithError(w http.ResponseWriter, code int, msg string) error {
 	return respondWithJSON(w, code, map[string]string{"error": msg})
+}
+
+func cleanBody(b string) string {
+	profane := []string{"kerfuffle", "sharbert", "fornax"}
+	sSlice := strings.Split(b, " ")
+	for i, word := range sSlice {
+		for _, cword := range profane {
+			if strings.ToLower(word) == cword {
+				sSlice[i] = "****"
+			}
+		}
+	}
+	return strings.Join(sSlice, " ")
 }
