@@ -10,8 +10,10 @@ import (
 	"os"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/RoshiSecOps/Chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -30,7 +32,7 @@ func main() {
 		log.Fatal(err)
 	}
 	dbQueries := database.New(db)
-	apiCfg := apiConfig{db: dbQueries}
+	apiCfg := apiConfig{db: dbQueries, platform: os.Getenv("PLATFORM")}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("./app")))))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -65,6 +67,7 @@ func main() {
 	})
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
+	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
 
 	server := http.Server{Addr: ":8080", Handler: mux}
 	log.Fatal(server.ListenAndServe())
@@ -74,6 +77,13 @@ func main() {
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	platform       string
+}
+type User struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Email     string    `json:"email"`
 }
 
 func (cfg *apiConfig) getHits() int {
@@ -85,9 +95,44 @@ func (cfg *apiConfig) resetHits() {
 }
 
 func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
-	cfg.resetHits()
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.WriteHeader(http.StatusOK)
+	if cfg.platform == "dev" {
+		cfg.resetHits()
+		cfg.db.DeleteUsers(r.Context())
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	respondWithError(w, 403, "")
+}
+
+func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email string `json:"email"`
+	}
+	dat, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	params := parameters{}
+	err = json.Unmarshal(dat, &params)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	user, err := cfg.db.CreateUser(r.Context(), params.Email)
+	if err != nil {
+		respondWithError(w, 400, "User could not be created")
+		log.Printf("CreateUser error: %v", err)
+		return
+	}
+	respondWithJSON(w, 201, User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
+
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
