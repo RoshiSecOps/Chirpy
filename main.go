@@ -40,31 +40,7 @@ func main() {
 		w.WriteHeader(200)
 		w.Write([]byte("OK"))
 	})
-	mux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
-		type parameters struct {
-			Body string `json:"body"`
-		}
-		type returnVals struct {
-			CleanedBody string `json:"cleaned_body"`
-		}
-
-		dat, err := io.ReadAll(r.Body)
-		if err != nil {
-			respondWithError(w, 500, "Something went wrong")
-			return
-		}
-		params := parameters{}
-		err = json.Unmarshal(dat, &params)
-		if err != nil {
-			respondWithError(w, 500, "Something went wrong")
-			return
-		}
-		if len(params.Body) < 140 {
-			respondWithJSON(w, 200, returnVals{CleanedBody: cleanBody(params.Body)})
-		} else {
-			respondWithError(w, 400, "Chirp is too long")
-		}
-	})
+	mux.HandleFunc("POST /api/chirps", apiCfg.createChirpHandler)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
@@ -84,6 +60,14 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+type Chirp struct {
+	ID        uuid.UUID `json:"id"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Body      string    `json:"body"`
+	UserID    uuid.UUID `json:"user_id"`
 }
 
 func (cfg *apiConfig) getHits() int {
@@ -133,6 +117,44 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		Email:     user.Email,
 	})
 
+}
+
+func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Body   string    `json:"body"`
+		UserID uuid.UUID `json:"user_id"`
+	}
+
+	dat, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	params := parameters{}
+	err = json.Unmarshal(dat, &params)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	if len(params.Body) < 140 {
+		params.Body = cleanBody(params.Body)
+		chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
+			Body:   params.Body,
+			UserID: params.UserID,
+		})
+		if err != nil {
+			log.Printf("Chirps error: %v", err)
+		}
+		respondWithJSON(w, 201, Chirp{
+			ID:        chirp.ID,
+			CreatedAt: chirp.CreatedAt,
+			UpdatedAt: chirp.UpdatedAt,
+			Body:      chirp.Body,
+			UserID:    chirp.UserID,
+		})
+	} else {
+		respondWithError(w, 400, "Chirp is too long")
+	}
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
