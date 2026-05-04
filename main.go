@@ -33,7 +33,7 @@ func main() {
 		log.Fatal(err)
 	}
 	dbQueries := database.New(db)
-	apiCfg := apiConfig{db: dbQueries, platform: os.Getenv("PLATFORM")}
+	apiCfg := apiConfig{db: dbQueries, platform: os.Getenv("PLATFORM"), secret: os.Getenv("JWT_SECRET")}
 	mux := http.NewServeMux()
 	mux.Handle("/app/", apiCfg.middlewareMetricsInc(http.StripPrefix("/app", http.FileServer(http.Dir("./app")))))
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -58,12 +58,18 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
 	platform       string
+	secret         string
 }
 type User struct {
 	ID        uuid.UUID `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+}
+
+type UserToken struct {
+	User
+	Token string `json:"token"`
 }
 
 type Chirp struct {
@@ -133,8 +139,9 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 
 func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Email      string `json:"email"`
+		Password   string `json:"password"`
+		ExpiriesIn int    `json:"expires_in_seconds"`
 	}
 	dat, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -161,11 +168,21 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, 401, "Unauthorized")
 		return
 	}
-	respondWithJSON(w, 200, User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt,
-		UpdatedAt: user.UpdatedAt,
-		Email:     user.Email,
+	expiration := time.Hour
+	if params.ExpiriesIn > 0 && params.ExpiriesIn < 3600 {
+		expiration = time.Duration(params.ExpiriesIn) * time.Second
+	}
+	token, err := auth.MakeJWT(user.ID, cfg.secret, expiration)
+	if err != nil {
+		respondWithError(w, 500, "could not create token")
+	}
+	respondWithJSON(w, 200, UserToken{
+		User: User{
+			ID:        user.ID,
+			CreatedAt: user.CreatedAt,
+			UpdatedAt: user.UpdatedAt,
+			Email:     user.Email},
+		Token: token,
 	})
 
 }
@@ -224,11 +241,21 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, 500, "Something went wrong")
 		return
 	}
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, "Error getting auth header")
+		return
+	}
+	tokenId, err := auth.ValidateJWT(token, cfg.secret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
 	if len(params.Body) < 140 {
 		params.Body = cleanBody(params.Body)
 		chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 			Body:   params.Body,
-			UserID: params.UserID,
+			UserID: tokenId,
 		})
 		if err != nil {
 			log.Printf("Chirps error: %v", err)
@@ -238,7 +265,7 @@ func (cfg *apiConfig) createChirpHandler(w http.ResponseWriter, r *http.Request)
 			CreatedAt: chirp.CreatedAt,
 			UpdatedAt: chirp.UpdatedAt,
 			Body:      chirp.Body,
-			UserID:    chirp.UserID,
+			UserID:    tokenId,
 		})
 	} else {
 		respondWithError(w, 400, "Chirp is too long")

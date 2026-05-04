@@ -2,12 +2,26 @@ package auth
 
 import (
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/alexedwards/argon2id"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 )
+
+func GetBearerToken(headers http.Header) (string, error) {
+	token := headers.Get("Authorization")
+	parts := strings.Fields(token)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("malformed authorization header")
+	}
+	if !strings.EqualFold(parts[0], "bearer") {
+		return "", fmt.Errorf("authorization scheme must be Bearer")
+	}
+	return parts[1], nil
+}
 
 func HashPassword(password string) (string, error) {
 	return argon2id.CreateHash(password, argon2id.DefaultParams)
