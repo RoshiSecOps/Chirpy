@@ -45,6 +45,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metricsHandler)
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
+	mux.HandleFunc("PUT /api/users", apiCfg.editUserHandler)
 	mux.HandleFunc("POST /api/login", apiCfg.loginUserHandler)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refreshTokenHandler)
 	mux.HandleFunc("POST /api/revoke", apiCfg.refreshTokenRevokeHandler)
@@ -100,6 +101,47 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithError(w, 403, "")
+}
+
+func (cfg *apiConfig) editUserHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	dat, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	params := parameters{}
+	err = json.Unmarshal(dat, &params)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	jToken, err := auth.GetBearerToken(r.Header)
+	userId, err := auth.ValidateJWT(jToken, cfg.secret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+	hashedPass, err := auth.HashPassword(params.Password)
+	if err != nil {
+		respondWithError(w, 500, "Pass was not hashed")
+		return
+	}
+	user, err := cfg.db.EditUserById(r.Context(), database.EditUserByIdParams{
+		Email: params.Email, HashedPassword: hashedPass, ID: userId,
+	})
+	if err != nil {
+		respondWithError(w, 500, "Failed editing user")
+	}
+	respondWithJSON(w, 200, User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt,
+		UpdatedAt: user.UpdatedAt,
+		Email:     user.Email,
+	})
 }
 
 func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) {
