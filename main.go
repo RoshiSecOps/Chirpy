@@ -51,6 +51,7 @@ func main() {
 	mux.HandleFunc("POST /api/revoke", apiCfg.refreshTokenRevokeHandler)
 	mux.HandleFunc("GET /api/chirps", apiCfg.getChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getChirpHanlder)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.deleteChirpHandler)
 
 	server := http.Server{Addr: ":8080", Handler: mux}
 	log.Fatal(server.ListenAndServe())
@@ -101,6 +102,39 @@ func (cfg *apiConfig) resetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	respondWithError(w, 403, "")
+}
+
+func (cfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request) {
+	jToken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "could not get auth token from request")
+		return
+	}
+	userId, err := auth.ValidateJWT(jToken, cfg.secret)
+	if err != nil {
+		respondWithError(w, 403, "Could not validate token")
+		return
+	}
+	chirpID, err := uuid.Parse(r.PathValue("chirpID"))
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	chirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 404, "Chirp not found")
+		return
+	}
+	if userId != chirp.UserID {
+		respondWithError(w, 403, "forbidden")
+		return
+	}
+	err = cfg.db.RemoveChirpById(r.Context(), chirpID)
+	if err != nil {
+		respondWithError(w, 500, "could not delete chirp")
+		return
+	}
+	respondWithJSON(w, 204, "Success")
 }
 
 func (cfg *apiConfig) editUserHandler(w http.ResponseWriter, r *http.Request) {
