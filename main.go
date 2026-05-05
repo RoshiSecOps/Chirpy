@@ -46,6 +46,8 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiCfg.resetHandler)
 	mux.HandleFunc("POST /api/users", apiCfg.createUserHandler)
 	mux.HandleFunc("POST /api/login", apiCfg.loginUserHandler)
+	mux.HandleFunc("POST /api/refresh", apiCfg.refreshTokenHandler)
+	mux.HandleFunc("POST /api/revoke", apiCfg.refreshTokenRevokeHandler)
 	mux.HandleFunc("GET /api/chirps", apiCfg.getChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getChirpHanlder)
 
@@ -69,7 +71,8 @@ type User struct {
 
 type UserToken struct {
 	User
-	Token string `json:"token"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type Chirp struct {
@@ -137,11 +140,49 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 
 }
 
+func (cfg *apiConfig) refreshTokenRevokeHandler(w http.ResponseWriter, r *http.Request) {
+	rtoken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Could not parse token")
+		return
+	}
+	err = cfg.db.RevokeToken(r.Context(), rtoken)
+	if err != nil {
+		respondWithError(w, 401, "Could not revoke token")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (cfg *apiConfig) refreshTokenHandler(w http.ResponseWriter, r *http.Request) {
+	type JToken struct {
+		Token string `json:"token"`
+	}
+	rtoken, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 500, "Could not parse token")
+		return
+	}
+	user, err := cfg.db.GetUserFromRefreshToken(r.Context(), rtoken)
+	if err != nil {
+		respondWithError(w, 401, "Could not get user by token")
+		return
+	}
+	id := user.ID
+	jtoken, err := auth.MakeJWT(id, cfg.secret, time.Hour)
+	if err != nil {
+		respondWithError(w, 500, "Could not generate JWT")
+		return
+	}
+	respondWithJSON(w, 200, JToken{
+		Token: jtoken,
+	})
+}
+
 func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
-		Email      string `json:"email"`
-		Password   string `json:"password"`
-		ExpiriesIn int    `json:"expires_in_seconds"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
 	dat, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -169,10 +210,14 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	expiration := time.Hour
-	if params.ExpiriesIn > 0 && params.ExpiriesIn < 3600 {
-		expiration = time.Duration(params.ExpiriesIn) * time.Second
+	rToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(w, 500, "could not get refresh token")
 	}
 	token, err := auth.MakeJWT(user.ID, cfg.secret, expiration)
+	cfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token: rToken, UserID: user.ID,
+	})
 	if err != nil {
 		respondWithError(w, 500, "could not create token")
 	}
@@ -182,7 +227,8 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
 			Email:     user.Email},
-		Token: token,
+		Token:        token,
+		RefreshToken: rToken,
 	})
 
 }
