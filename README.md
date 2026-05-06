@@ -36,6 +36,8 @@ Chirpy is a simple social media backend server written in Go. It allows users to
 | **Webhooks**| `POST` | `/api/polka/webhooks` | Handle Polka premium upgrades | **Yes** |
 
 
+### Example Requests
+
 ```bash
 
 curl -X POST http://localhost:8080/api/users \
