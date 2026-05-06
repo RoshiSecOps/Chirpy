@@ -13,6 +13,18 @@ import (
 	"github.com/google/uuid"
 )
 
+func GetAPIKey(headers http.Header) (string, error) {
+	token := headers.Get("Authorization")
+	parts := strings.Fields(token)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("malformed authorization header")
+	}
+	if !strings.EqualFold(parts[0], "ApiKey") {
+		return "", fmt.Errorf("authorization scheme must be ApiKey")
+	}
+	return parts[1], nil
+}
+
 func MakeRefreshToken() (string, error) {
 	key := make([]byte, 32)
 	_, err := rand.Read(key)

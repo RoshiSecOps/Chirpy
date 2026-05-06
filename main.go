@@ -52,6 +52,7 @@ func main() {
 	mux.HandleFunc("GET /api/chirps", apiCfg.getChirpsHandler)
 	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.getChirpHanlder)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.deleteChirpHandler)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.upgradeUserHandler)
 
 	server := http.Server{Addr: ":8080", Handler: mux}
 	log.Fatal(server.ListenAndServe())
@@ -69,6 +70,7 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	IsRed     bool      `json:"is_chirpy_red"`
 }
 
 type UserToken struct {
@@ -136,6 +138,40 @@ func (cfg *apiConfig) deleteChirpHandler(w http.ResponseWriter, r *http.Request)
 	}
 	respondWithJSON(w, 204, "Success")
 }
+func (cfg *apiConfig) upgradeUserHandler(w http.ResponseWriter, r *http.Request) {
+	type parameters struct {
+		Event string `json:"event"`
+		Data  struct {
+			UserId uuid.UUID `json:"user_id"`
+		} `json:"data"`
+	}
+	akey, err := auth.GetAPIKey(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "")
+	}
+	if akey != os.Getenv("POLKA_KEY") {
+		respondWithError(w, 401, "")
+	}
+	dat, err := io.ReadAll(r.Body)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	params := parameters{}
+	err = json.Unmarshal(dat, &params)
+	if err != nil {
+		respondWithError(w, 500, "Something went wrong")
+		return
+	}
+	if params.Event != "user.upgrade" {
+		respondWithJSON(w, 204, "")
+	}
+	err = cfg.db.UpgradeUser(r.Context(), params.Data.UserId)
+	if err != nil {
+		respondWithError(w, 404, "Not Found")
+	}
+	respondWithJSON(w, 204, "")
+}
 
 func (cfg *apiConfig) editUserHandler(w http.ResponseWriter, r *http.Request) {
 	type parameters struct {
@@ -175,6 +211,7 @@ func (cfg *apiConfig) editUserHandler(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		IsRed:     user.IsChirpyRed,
 	})
 }
 
@@ -212,6 +249,7 @@ func (cfg *apiConfig) createUserHandler(w http.ResponseWriter, r *http.Request) 
 		CreatedAt: user.CreatedAt,
 		UpdatedAt: user.UpdatedAt,
 		Email:     user.Email,
+		IsRed:     user.IsChirpyRed,
 	})
 
 }
@@ -302,7 +340,8 @@ func (cfg *apiConfig) loginUserHandler(w http.ResponseWriter, r *http.Request) {
 			ID:        user.ID,
 			CreatedAt: user.CreatedAt,
 			UpdatedAt: user.UpdatedAt,
-			Email:     user.Email},
+			Email:     user.Email,
+			IsRed:     user.IsChirpyRed},
 		Token:        token,
 		RefreshToken: rToken,
 	})
@@ -328,6 +367,31 @@ func (cfg *apiConfig) getChirpHanlder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (cfg *apiConfig) getChirpsHandler(w http.ResponseWriter, r *http.Request) {
+	s := r.URL.Query().Get("author_id")
+	if s != "" {
+		userId, err := uuid.Parse(s)
+		if err != nil {
+			respondWithError(w, 401, "")
+			return
+		}
+		chirps, err := cfg.db.GetChirpsByUserId(r.Context(), userId)
+		if err != nil {
+			respondWithError(w, 401, "")
+			return
+		}
+		fmChirps := []Chirp{}
+		for _, chirp := range chirps {
+			fmChirps = append(fmChirps, Chirp{
+				ID:        chirp.ID,
+				CreatedAt: chirp.CreatedAt,
+				UpdatedAt: chirp.UpdatedAt,
+				Body:      chirp.Body,
+				UserID:    chirp.UserID,
+			})
+		}
+		respondWithJSON(w, 200, fmChirps)
+		return
+	}
 	chirps, err := cfg.db.GetChirps(r.Context())
 	if err != nil {
 		log.Printf("Error getting chirps: %v", err)
