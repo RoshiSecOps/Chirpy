@@ -13,32 +13,30 @@ Chirpy is a simple social media backend server written in Go. It allows users to
 ## Getting Started
 
 1. **Clone the repository**
-   ```bash
-   git clone https://github.com/RoshiSecOps/chirpy.git
+   ```bash git clone https://github.com/RoshiSecOps/chirpy.git```
+2. **Run the server**
+   ```bash go build -o chirpy && ./chirpy```
 
-Run the server
-go build -o chirpy && ./chirpy
 
-API Documentation
-Users
-POST /api/users - Create a new user account.
-POST /api/login - Authenticate a user and receive tokens.
-PUT /api/users - Update authenticated user information.
-POST /api/refresh - Refresh an expired access token.
-POST /api/revoke - Revoke a refresh token.
-Chirps
-GET /api/chirps - Retrieve all chirps.
-GET /api/chirps/{chirpID} - Retrieve a specific chirp by ID.
-POST /api/chirps - Create a new chirp (requires authentication).
-DELETE /api/chirps/{chirpID} - Delete a chirp (requires authentication).
-Administration
-GET /admin/metrics - View server usage statistics.
-POST /admin/reset - Reset the database state (Development only).
-Webhooks
-POST /api/polka/webhooks - Handle account upgrades from Polka.
-Example API Requests
-Users & Authentication
-Create User
+### API Documentation
+
+| Category | Method | Endpoint | Description | Auth |
+| :--- | :--- | :--- | :--- | :--- |
+| **Users** | `POST` | `/api/users` | Create a new user account | No |
+| | `POST` | `/api/login` | Authenticate user and receive tokens | No |
+| | `PUT` | `/api/users` | Update authenticated user info | **Yes** |
+| | `POST` | `/api/refresh` | Refresh an expired access token | **Yes** |
+| | `POST` | `/api/revoke` | Revoke a refresh token | **Yes** |
+| **Chirps** | `GET` | `/api/chirps` | Retrieve all chirps | No |
+| | `GET` | `/api/chirps/{id}` | Retrieve a specific chirp by ID | No |
+| | `POST` | `/api/chirps` | Create a new chirp | **Yes** |
+| | `DELETE` | `/api/chirps/{id}` | Delete a specific chirp | **Yes** |
+| **Admin** | `GET` | `/admin/metrics` | View server usage statistics | No |
+| | `POST` | `/admin/reset` | Reset database state (Dev only) | No |
+| **Webhooks**| `POST` | `/api/polka/webhooks` | Handle Polka premium upgrades | **Yes** |
+
+
+```bash
 
 curl -X POST http://localhost:8080/api/users \
   -H "Content-Type: application/json" \
@@ -96,3 +94,5 @@ curl -X POST http://localhost:8080/api/polka/webhooks \
       "user_id": "123e4567-e89b-12d3-a456-426614174000"
     }
   }'
+
+  ```
